@@ -74,13 +74,20 @@
   .badge{display:inline-block;background:var(--card2);border:1px solid var(--border);padding:2px 8px;border-radius:20px;font-size:12px;color:var(--muted);}
   .summary-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);}
   .footer-note{font-size:12px;color:var(--muted);text-align:center;margin-top:20px;}
+  .table-wrap table{margin-top:0;}
+  .empty-note{color:var(--muted);font-size:13px;padding:20px 0;text-align:center;}
+  .status-yes{color:var(--accent2);font-weight:600;}
+  .status-no{color:var(--danger);font-weight:600;}
+  .link-btn{color:var(--accent);text-decoration:none;font-size:12px;white-space:nowrap;}
+  .link-btn:hover{text-decoration:underline;}
 </style>
 </head>
 <body>
 
 <header>
   <h1>📦 Return Received Dashboard</h1>
-  <div style="display:flex;align-items:center;gap:16px;">
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    <a href="javascript:void(0)" onclick="toggleHistoryView()" style="color:var(--accent);font-size:13px;text-decoration:none;" id="historyNavLink">📜 Session History</a>
     <a href="summary-dashboard.html" style="color:var(--accent);font-size:13px;text-decoration:none;">📊 View Summary Dashboard →</a>
     <div class="scanner-tag" id="scannerTag">Not logged in</div>
   </div>
@@ -281,6 +288,25 @@
     <div class="actions">
       <button class="btn btn-success" onclick="sendMailButtonClick()" id="sendMailBtn">📧 Send Mail</button>
       <button class="btn btn-primary" onclick="resetToClientSelect()">Start New Session</button>
+    </div>
+  </div>
+
+  <!-- SESSION HISTORY -->
+  <div class="card hidden" id="historyCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+      <h2 style="margin:0;">📜 Session History (Closed Sessions)</h2>
+      <div class="actions" style="margin:0;">
+        <button class="btn btn-outline" onclick="loadSessionHistory()">🔄 Refresh</button>
+        <button class="btn btn-outline" onclick="closeHistoryView()">← Back</button>
+      </div>
+    </div>
+    <div class="table-wrap" style="max-height:520px;overflow-y:auto;margin-top:14px;">
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Client</th><th>Total AWB</th><th>Scanner</th><th>POD</th><th>Report</th><th>Mail Status</th><th></th></tr>
+        </thead>
+        <tbody id="historyBody"><tr><td colspan="8" class="empty-note">Loading…</td></tr></tbody>
+      </table>
     </div>
   </div>
 
@@ -1156,6 +1182,102 @@ async function saveToBackend(payload) {
   } catch (e) {
     showToast("⚠️ Save failed — check connection", true);
     console.error(e);
+  }
+}
+
+/* ============================================================
+   SESSION HISTORY — log of every closed session (all clients),
+   with POD/report links and mail status, so a management user
+   can review and, if needed, resend the summary mail.
+   ============================================================ */
+let historyPrevCardId = null;
+const MAIN_CARD_IDS = ["loginCard", "selectCard", "scanCard", "summaryCard"];
+
+function toggleHistoryView() {
+  const historyCard = document.getElementById("historyCard");
+  if (!historyCard.classList.contains("hidden")) {
+    closeHistoryView();
+    return;
+  }
+  historyPrevCardId = MAIN_CARD_IDS.find(id => !document.getElementById(id).classList.contains("hidden")) || null;
+  MAIN_CARD_IDS.forEach(id => document.getElementById(id).classList.add("hidden"));
+  historyCard.classList.remove("hidden");
+  loadSessionHistory();
+}
+
+function closeHistoryView() {
+  document.getElementById("historyCard").classList.add("hidden");
+  const restoreId = historyPrevCardId || "loginCard";
+  document.getElementById(restoreId).classList.remove("hidden");
+}
+
+async function loadSessionHistory() {
+  const body = document.getElementById("historyBody");
+  body.innerHTML = '<tr><td colspan="8" class="empty-note">Loading…</td></tr>';
+  if (!API_URL || API_URL.indexOf("PASTE_YOUR") !== -1) {
+    body.innerHTML = '<tr><td colspan="8" class="empty-note">Backend not configured yet.</td></tr>';
+    return;
+  }
+  try {
+    const res = await fetch(API_URL + "?action=getSessions");
+    const data = await res.json();
+    renderHistoryTable((data && data.sessions) || []);
+  } catch (e) {
+    console.error(e);
+    body.innerHTML = '<tr><td colspan="8" class="empty-note">⚠️ Could not load session history — check connection.</td></tr>';
+  }
+}
+
+function renderHistoryTable(sessions) {
+  const body = document.getElementById("historyBody");
+  body.innerHTML = "";
+  if (!sessions.length) {
+    body.innerHTML = '<tr><td colspan="8" class="empty-note">No closed sessions yet.</td></tr>';
+    return;
+  }
+  // Most recent first.
+  sessions.slice().reverse().forEach(s => {
+    const podCell = (s.podLinks && s.podLinks.length)
+      ? s.podLinks.map((id, idx) => `<a class="link-btn" href="https://drive.google.com/file/d/${id}/view" target="_blank" rel="noopener">POD ${idx+1}</a>`).join(" · ")
+      : "—";
+    const csvCell = s.csvLink
+      ? `<a class="link-btn" href="https://drive.google.com/file/d/${s.csvLink}/view" target="_blank" rel="noopener">⬇️ CSV</a>`
+      : "—";
+    const mailCell = s.mailSent
+      ? `<span class="status-yes">✅ Sent</span><br><span style="font-size:11px;color:var(--muted);">${s.mailSentAt || ""}</span>`
+      : `<span class="status-no">❌ Not Sent</span>`;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${s.sessionDate || ""}</td><td>${s.client || ""}</td><td>${s.totalAwb || 0}</td>
+      <td>${s.scanner || ""}</td><td>${podCell}</td><td>${csvCell}</td><td>${mailCell}</td>
+      <td><button class="btn btn-outline" style="padding:6px 10px;font-size:12px;" onclick="resendMail('${s.sessionId}', '${String(s.client).replace(/'/g, "\\'")}', this)">📧 Resend</button></td>`;
+    body.appendChild(tr);
+  });
+}
+
+async function resendMail(sessionId, client, btn) {
+  if (!API_URL || API_URL.indexOf("PASTE_YOUR") !== -1) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Sending...";
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: {"Content-Type": "text/plain;charset=utf-8"},
+      body: JSON.stringify({ action: "resendMail", sessionId, client })
+    });
+    const data = await res.json();
+    if (data && data.ok) {
+      showToast(`📧 Mail resent to ${client}`);
+      loadSessionHistory();
+    } else {
+      showToast(`⚠️ Could not resend: ${(data && data.error) || "unknown error"}`, true);
+    }
+  } catch (e) {
+    showToast("⚠️ Resend failed — check connection", true);
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
   }
 }
 
