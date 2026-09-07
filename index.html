@@ -1344,7 +1344,7 @@ function showToast(msg, isError) {
   t.className = "toast" + (isError ? " error" : "");
   t.textContent = msg;
   box.appendChild(t);
-  setTimeout(() => t.remove(), 3500);
+  setTimeout(() => t.remove(), isError ? 8000 : 3500);
 }
 </script>
 </body>
