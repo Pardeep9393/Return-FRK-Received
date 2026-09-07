@@ -300,6 +300,28 @@
         <button class="btn btn-outline" onclick="closeHistoryView()">← Back</button>
       </div>
     </div>
+
+    <div class="row" style="margin-top:14px;align-items:end;">
+      <div>
+        <label for="historyDateFrom">Date From</label>
+        <input type="date" id="historyDateFrom">
+      </div>
+      <div>
+        <label for="historyDateTo">Date To</label>
+        <input type="date" id="historyDateTo">
+      </div>
+      <div>
+        <label for="historyClientFilter">Client</label>
+        <select id="historyClientFilter"><option value="">All Clients</option></select>
+      </div>
+      <div style="flex:0;">
+        <button class="btn btn-primary" onclick="applyHistoryFilters()">Apply</button>
+      </div>
+      <div style="flex:0;">
+        <button class="btn btn-outline" onclick="resetHistoryFilters()">Reset</button>
+      </div>
+    </div>
+
     <div class="table-wrap" style="max-height:520px;overflow-y:auto;margin-top:14px;">
       <table>
         <thead>
@@ -1192,6 +1214,8 @@ async function saveToBackend(payload) {
    ============================================================ */
 let historyPrevCardId = null;
 const MAIN_CARD_IDS = ["loginCard", "selectCard", "scanCard", "summaryCard"];
+let allSessions = [];
+let filteredSessions = [];
 
 function toggleHistoryView() {
   const historyCard = document.getElementById("historyCard");
@@ -1211,6 +1235,53 @@ function closeHistoryView() {
   document.getElementById(restoreId).classList.remove("hidden");
 }
 
+// Session Date is stored as "DD-MMM-YYYY" (e.g. "07-Sep-2026"). Normalize
+// to YYYY-MM-DD so it can be compared against <input type="date"> values.
+const HISTORY_MONTHS = { Jan:"01", Feb:"02", Mar:"03", Apr:"04", May:"05", Jun:"06", Jul:"07", Aug:"08", Sep:"09", Oct:"10", Nov:"11", Dec:"12" };
+function historyDateOnly(s) {
+  const parts = String(s || "").split("-");
+  if (parts.length !== 3) return "";
+  const [dd, mon, yyyy] = parts;
+  const mm = HISTORY_MONTHS[mon];
+  if (!mm) return "";
+  return `${yyyy}-${mm}-${dd.padStart(2, "0")}`;
+}
+
+function populateHistoryClientFilter() {
+  const sel = document.getElementById("historyClientFilter");
+  const current = sel.value;
+  const clients = Array.from(new Set(allSessions.map(s => s.client))).sort();
+  sel.innerHTML = '<option value="">All Clients</option>' +
+    clients.map(c => `<option value="${c}">${c}</option>`).join("");
+  sel.value = current;
+}
+
+function applyHistoryFilters() {
+  const from = document.getElementById("historyDateFrom").value;
+  const to = document.getElementById("historyDateTo").value;
+  const client = document.getElementById("historyClientFilter").value;
+
+  filteredSessions = allSessions.filter(s => {
+    if (client && s.client !== client) return false;
+    if (from || to) {
+      const d = historyDateOnly(s.sessionDate);
+      if (!d) return false;
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+    }
+    return true;
+  });
+  renderHistoryTable(filteredSessions);
+}
+
+function resetHistoryFilters() {
+  document.getElementById("historyDateFrom").value = "";
+  document.getElementById("historyDateTo").value = "";
+  document.getElementById("historyClientFilter").value = "";
+  filteredSessions = allSessions.slice();
+  renderHistoryTable(filteredSessions);
+}
+
 async function loadSessionHistory() {
   const body = document.getElementById("historyBody");
   body.innerHTML = '<tr><td colspan="8" class="empty-note">Loading…</td></tr>';
@@ -1221,7 +1292,10 @@ async function loadSessionHistory() {
   try {
     const res = await fetch(API_URL + "?action=getSessions");
     const data = await res.json();
-    renderHistoryTable((data && data.sessions) || []);
+    allSessions = (data && data.sessions) || [];
+    populateHistoryClientFilter();
+    filteredSessions = allSessions.slice();
+    renderHistoryTable(filteredSessions);
   } catch (e) {
     console.error(e);
     body.innerHTML = '<tr><td colspan="8" class="empty-note">⚠️ Could not load session history — check connection.</td></tr>';
@@ -1268,7 +1342,8 @@ async function resendMail(sessionId, client, btn) {
     const data = await res.json();
     if (data && data.ok) {
       showToast(`📧 Mail resent to ${client}`);
-      loadSessionHistory();
+      await loadSessionHistory();
+      applyHistoryFilters();
     } else {
       showToast(`⚠️ Could not resend: ${(data && data.error) || "unknown error"}`, true);
     }
