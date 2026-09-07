@@ -954,7 +954,7 @@ function handleScanKey(e) {
       return;
     }
     const time = new Date().toLocaleString();
-    scanRows.push({ awb, time, status: "Good" });
+    scanRows.push({ awb, time, status: "" });
     input.value = "";
     renderScanTable();
   }
@@ -964,10 +964,11 @@ function renderScanTable() {
   const body = document.getElementById("scanTableBody");
   body.innerHTML = "";
   scanRows.forEach((r, i) => {
-    if (!r.status) r.status = "Good";
+    if (!r.status) r.status = "";
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${i+1}</td><td>${r.awb}</td><td>${r.time}</td>
       <td><select onchange="updateRowStatus(${i}, this.value)" style="width:auto;padding:6px 8px;font-size:13px;">
+        <option value="" ${r.status === "" ? "selected" : ""}>-- Select --</option>
         <option value="Good" ${r.status === "Good" ? "selected" : ""}>Good</option>
         <option value="Damage" ${r.status === "Damage" ? "selected" : ""}>Damage</option>
         <option value="Open" ${r.status === "Open" ? "selected" : ""}>Open</option>
@@ -1007,7 +1008,7 @@ async function finishCourier(mode) {
       awb: r.awb,
       courier: currentCourier,
       scanner: currentScanner,
-      status: r.status || "Good"
+      status: r.status || ""
     }))
   };
 
@@ -1020,7 +1021,7 @@ async function finishCourier(mode) {
       awb: r.awb,
       courier: currentCourier,
       scanner: currentScanner,
-      status: r.status || "Good"
+      status: r.status || ""
     });
   });
 
@@ -1332,7 +1333,7 @@ function csvEscape(val) {
 // Used by both the Download button and the mail attachment, so they always match.
 function buildSessionCSV() {
   const rows = [["Scan Date", "Client Name", "AWB", "Courier", "Scanner Name", "Status"]];
-  sessionAllRows.forEach(r => rows.push([r.scanDate, r.client, r.awb, r.courier, r.scanner, r.status || "Good"]));
+  sessionAllRows.forEach(r => rows.push([r.scanDate, r.client, r.awb, r.courier, r.scanner, r.status || ""]));
 
   const courierMap = {};
   sessionAllRows.forEach(r => {
@@ -1380,7 +1381,7 @@ function groupRowsByClient() {
 
 function buildClientCSV(client, rows) {
   const out = [["Scan Date", "Client Name", "AWB", "Courier", "Scanner Name", "Status"]];
-  rows.forEach(r => out.push([r.scanDate, r.client, r.awb, r.courier, r.scanner, r.status || "Good"]));
+  rows.forEach(r => out.push([r.scanDate, r.client, r.awb, r.courier, r.scanner, r.status || ""]));
 
   const courierMap = {};
   rows.forEach(r => { courierMap[r.courier] = (courierMap[r.courier] || 0) + 1; });
@@ -1406,7 +1407,7 @@ function buildClientPDFBlob(client, rows) {
   doc.autoTable({
     startY: 28,
     head: [["Scan Date", "AWB", "Courier", "Scanner", "Status"]],
-    body: rows.map(r => [r.scanDate, r.awb, r.courier, r.scanner, r.status || "Good"]),
+    body: rows.map(r => [r.scanDate, r.awb, r.courier, r.scanner, r.status || ""]),
     styles: { fontSize: 8 }
   });
 
