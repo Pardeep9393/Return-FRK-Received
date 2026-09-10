@@ -233,8 +233,8 @@
     </table>
 
     <div class="actions">
-      <button class="btn btn-primary" onclick="finishCourier('new')" id="newScanBtn">🔄 New Scan (Next Courier)</button>
-      <button class="btn btn-success" onclick="finishCourier('done')" id="allDoneBtn">✅ All Scan Done (Close Session)</button>
+      <button class="btn btn-primary" onclick="finishCourier('new')" id="newScanBtn">🆕 New Session</button>
+      <button class="btn btn-success" onclick="finishCourier('done')" id="allDoneBtn">🔒 Close All Session</button>
     </div>
   </div>
 
@@ -260,6 +260,10 @@
       <div>
         <label for="historyClientFilter">Client</label>
         <select id="historyClientFilter"><option value="">All Clients</option></select>
+      </div>
+      <div>
+        <label for="historyCourierFilter">Courier</label>
+        <select id="historyCourierFilter"><option value="">All Couriers</option></select>
       </div>
       <div style="flex:0;">
         <button class="btn btn-primary" onclick="applyHistoryFilters()">Apply</button>
@@ -1134,9 +1138,12 @@ function closeHistoryView() {
 
 // Session Date is stored as "DD-MMM-YYYY" (e.g. "07-Sep-2026"). Normalize
 // to YYYY-MM-DD so it can be compared against <input type="date"> values.
+// Guarded against a trailing time part (e.g. "07-Sep-2026 14:30:00") in
+// case a session record ever carries one — only the date portion is used.
 const HISTORY_MONTHS = { Jan:"01", Feb:"02", Mar:"03", Apr:"04", May:"05", Jun:"06", Jul:"07", Aug:"08", Sep:"09", Oct:"10", Nov:"11", Dec:"12" };
 function historyDateOnly(s) {
-  const parts = String(s || "").split("-");
+  const dateOnly = String(s || "").trim().split(/\s+/)[0]; // drop any time part
+  const parts = dateOnly.split("-");
   if (parts.length !== 3) return "";
   const [dd, mon, yyyy] = parts;
   const mm = HISTORY_MONTHS[mon];
@@ -1153,13 +1160,26 @@ function populateHistoryClientFilter() {
   sel.value = current;
 }
 
+function populateHistoryCourierFilter() {
+  const sel = document.getElementById("historyCourierFilter");
+  const current = sel.value;
+  const courierSet = new Set();
+  allSessions.forEach(s => (s.couriers || []).forEach(c => courierSet.add(c)));
+  const couriers = Array.from(courierSet).sort();
+  sel.innerHTML = '<option value="">All Couriers</option>' +
+    couriers.map(c => `<option value="${c}">${c}</option>`).join("");
+  sel.value = current;
+}
+
 function applyHistoryFilters() {
   const from = document.getElementById("historyDateFrom").value;
   const to = document.getElementById("historyDateTo").value;
   const client = document.getElementById("historyClientFilter").value;
+  const courier = document.getElementById("historyCourierFilter").value;
 
   filteredSessions = allSessions.filter(s => {
     if (client && s.client !== client) return false;
+    if (courier && (!s.couriers || s.couriers.indexOf(courier) === -1)) return false;
     if (from || to) {
       const d = historyDateOnly(s.sessionDate);
       if (!d) return false;
@@ -1175,6 +1195,7 @@ function resetHistoryFilters() {
   document.getElementById("historyDateFrom").value = "";
   document.getElementById("historyDateTo").value = "";
   document.getElementById("historyClientFilter").value = "";
+  document.getElementById("historyCourierFilter").value = "";
   filteredSessions = allSessions.slice();
   renderHistoryTable(filteredSessions);
 }
@@ -1191,6 +1212,7 @@ async function loadSessionHistory() {
     const data = await res.json();
     allSessions = (data && data.sessions) || [];
     populateHistoryClientFilter();
+    populateHistoryCourierFilter();
     filteredSessions = allSessions.slice();
     renderHistoryTable(filteredSessions);
   } catch (e) {
@@ -1218,16 +1240,22 @@ function renderHistoryTable(sessions) {
         <input type="file" id="podInput_${idx}" multiple accept=".pdf,.jpg,.jpeg,application/pdf,image/jpeg" style="font-size:11px;max-width:140px;">
         <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;margin-top:4px;" onclick="uploadPodForSession('${s.sessionId}', '${clientEsc}', ${idx}, this)">📎 Upload POD</button>
       </div>`;
+    // Direct-download links (uc?export=download) so clicking pulls the file
+    // straight down instead of only opening the Drive viewer.
     const reportCell = [
-      s.pdfLink ? `<a class="link-btn" href="https://drive.google.com/file/d/${s.pdfLink}/view" target="_blank" rel="noopener">📄 PDF</a>` : "",
-      s.excelLink ? `<a class="link-btn" href="https://drive.google.com/file/d/${s.excelLink}/view" target="_blank" rel="noopener">📊 Excel</a>` : ""
+      s.pdfLink ? `<a class="link-btn" href="https://drive.google.com/uc?export=download&id=${s.pdfLink}" target="_blank" rel="noopener">⬇ PDF</a>` : "",
+      s.excelLink ? `<a class="link-btn" href="https://drive.google.com/uc?export=download&id=${s.excelLink}" target="_blank" rel="noopener">⬇ Excel</a>` : "",
+      s.docLink ? `<a class="link-btn" href="https://drive.google.com/uc?export=download&id=${s.docLink}" target="_blank" rel="noopener">⬇ Doc</a>` : ""
     ].filter(Boolean).join(" · ") || "—";
     const mailCell = s.mailSent
       ? `<span class="status-yes">✅ Sent</span><br><span style="font-size:11px;color:var(--muted);">${s.mailSentAt || ""}</span>`
       : `<span class="status-no">❌ Not Sent</span>`;
     const mailBtnLabel = s.mailSent ? "📧 Resend Mail" : "📧 Send Mail";
+    const clientCell = (s.couriers && s.couriers.length)
+      ? `${s.client || ""}<br><span style="font-size:11px;color:var(--muted);">${s.couriers.join(", ")}</span>`
+      : (s.client || "");
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${s.sessionDate || ""}</td><td>${s.client || ""}</td><td>${s.totalAwb || 0}</td>
+    tr.innerHTML = `<td>${s.sessionDate || ""}</td><td>${clientCell}</td><td>${s.totalAwb || 0}</td>
       <td>${s.scanner || ""}</td><td>${podCell}</td><td>${reportCell}</td><td>${mailCell}</td>
       <td><button class="btn btn-outline" style="padding:6px 10px;font-size:12px;" onclick="sendMailForSession('${s.sessionId}', '${clientEsc}', this)">${mailBtnLabel}</button></td>`;
     body.appendChild(tr);
