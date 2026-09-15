@@ -276,7 +276,7 @@
     <div class="table-wrap" style="max-height:520px;overflow-y:auto;margin-top:14px;">
       <table>
         <thead>
-          <tr><th>Date</th><th>Client</th><th>Total AWB</th><th>Scanner</th><th>POD</th><th>Report</th><th>Mail Status</th><th></th></tr>
+          <tr><th>Date</th><th>Client</th><th>Total AWB</th><th>Scanner</th><th>Signed PDF</th><th>Report</th><th>Mail Status</th><th></th></tr>
         </thead>
         <tbody id="historyBody"><tr><td colspan="8" class="empty-note">Loading…</td></tr></tbody>
       </table>
@@ -1114,8 +1114,9 @@ async function saveToBackend(payload) {
 
 /* ============================================================
    SESSION HISTORY — log of every closed session (all clients),
-   with POD/report links and mail status, so a management user
-   can review and, if needed, resend the summary mail.
+   with signed-PDF/report links and mail status, so a management
+   user can review, upload the signed copy, and send the summary
+   mail to the client.
    ============================================================ */
 let historyPrevCardId = null;
 const MAIN_CARD_IDS = ["loginCard", "selectCard", "scanCard"];
@@ -1234,22 +1235,24 @@ function renderHistoryTable(sessions) {
   }
   // Most recent first.
   sessions.slice().reverse().forEach((s, idx) => {
-    const podLinksHtml = (s.podLinks && s.podLinks.length)
-      ? s.podLinks.map((id, i) => `<a class="link-btn" href="https://drive.google.com/file/d/${id}/view" target="_blank" rel="noopener">POD ${i+1}</a>`).join(" · ")
-      : `<span style="color:var(--muted);font-size:12px;">No POD yet</span>`;
+    // "Signed PDF" column — the manually uploaded, signed copy of the
+    // auto PDF report (this is what actually goes out in the client mail).
+    const signedLinksHtml = (s.podLinks && s.podLinks.length)
+      ? s.podLinks.map((id, i) => `<a class="link-btn" href="https://drive.google.com/file/d/${id}/view" target="_blank" rel="noopener">Signed PDF ${i+1}</a>`).join(" · ")
+      : `<span style="color:var(--muted);font-size:12px;">Not uploaded yet</span>`;
     const clientEsc = String(s.client).replace(/'/g, "\\'");
-    const podCell = `
-      <div>${podLinksHtml}</div>
+    const signedCell = `
+      <div>${signedLinksHtml}</div>
       <div style="margin-top:6px;">
-        <input type="file" id="podInput_${idx}" multiple accept=".pdf,.jpg,.jpeg,application/pdf,image/jpeg" style="font-size:11px;max-width:140px;">
-        <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;margin-top:4px;" onclick="uploadPodForSession('${s.sessionId}', '${clientEsc}', ${idx}, this)">📎 Upload POD</button>
+        <input type="file" id="podInput_${idx}" multiple accept=".pdf,application/pdf" style="font-size:11px;max-width:140px;">
+        <button class="btn btn-outline" style="padding:3px 8px;font-size:11px;margin-top:4px;" onclick="uploadPodForSession('${s.sessionId}', '${clientEsc}', ${idx}, this)">📎 Upload Signed PDF</button>
       </div>`;
     // Direct-download links (uc?export=download) so clicking pulls the file
-    // straight down instead of only opening the Drive viewer.
+    // straight down instead of only opening the Drive viewer. The auto PDF
+    // is what you download to sign; the Excel is the courier-wise report.
     const reportCell = [
-      s.pdfLink ? `<a class="link-btn" href="https://drive.google.com/uc?export=download&id=${s.pdfLink}" target="_blank" rel="noopener">⬇ PDF</a>` : "",
-      s.excelLink ? `<a class="link-btn" href="https://drive.google.com/uc?export=download&id=${s.excelLink}" target="_blank" rel="noopener">⬇ Excel</a>` : "",
-      s.docLink ? `<a class="link-btn" href="https://drive.google.com/uc?export=download&id=${s.docLink}" target="_blank" rel="noopener">⬇ Doc</a>` : ""
+      s.pdfLink ? `<a class="link-btn" href="https://drive.google.com/uc?export=download&id=${s.pdfLink}" target="_blank" rel="noopener">⬇ PDF (unsigned)</a>` : "",
+      s.excelLink ? `<a class="link-btn" href="https://drive.google.com/uc?export=download&id=${s.excelLink}" target="_blank" rel="noopener">⬇ Excel</a>` : ""
     ].filter(Boolean).join(" · ") || "—";
     const mailCell = s.mailSent
       ? `<span class="status-yes">✅ Sent</span><br><span style="font-size:11px;color:var(--muted);">${s.mailSentAt || ""}</span>`
@@ -1260,7 +1263,7 @@ function renderHistoryTable(sessions) {
       : (s.client || "");
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${s.sessionDate || ""}</td><td>${clientCell}</td><td>${s.totalAwb || 0}</td>
-      <td>${s.scanner || ""}</td><td>${podCell}</td><td>${reportCell}</td><td>${mailCell}</td>
+      <td>${s.scanner || ""}</td><td>${signedCell}</td><td>${reportCell}</td><td>${mailCell}</td>
       <td><button class="btn btn-outline" style="padding:6px 10px;font-size:12px;" onclick="sendMailForSession('${s.sessionId}', '${clientEsc}', this)">${mailBtnLabel}</button></td>`;
     body.appendChild(tr);
   });
@@ -1294,19 +1297,21 @@ async function sendMailForSession(sessionId, client, btn) {
   }
 }
 
+// Uploads the manually SIGNED PDF (download the auto PDF from the Report
+// column, sign it, then upload the signed copy here). Only PDF files are
+// accepted — this is what sendMail attaches to the client email.
 async function uploadPodForSession(sessionId, client, idx, btn) {
   const input = document.getElementById(`podInput_${idx}`);
   const files = Array.from((input && input.files) || []);
   if (!files.length) {
-    showToast("⚠️ Choose at least one POD file first", true);
+    showToast("⚠️ Choose the signed PDF file first", true);
     return;
   }
-  const allowedTypes = ["application/pdf", "image/jpeg", "image/jpg"];
   const validFiles = files.filter(file => {
     const nameLower = file.name.toLowerCase();
-    const validExt = nameLower.endsWith(".pdf") || nameLower.endsWith(".jpg") || nameLower.endsWith(".jpeg");
-    if (!validExt && allowedTypes.indexOf(file.type) === -1) {
-      showToast(`⚠️ Skipped "${file.name}" — only PDF, JPG or JPEG allowed`, true);
+    const validExt = nameLower.endsWith(".pdf");
+    if (!validExt && file.type !== "application/pdf") {
+      showToast(`⚠️ Skipped "${file.name}" — only PDF allowed`, true);
       return false;
     }
     return true;
@@ -1320,10 +1325,9 @@ async function uploadPodForSession(sessionId, client, idx, btn) {
     const podFiles = [];
     for (const file of validFiles) {
       const base64 = await fileToBase64(file);
-      const nameLower = file.name.toLowerCase();
       podFiles.push({
         name: file.name,
-        mimeType: file.type || (nameLower.endsWith(".pdf") ? "application/pdf" : "image/jpeg"),
+        mimeType: file.type || "application/pdf",
         base64: base64
       });
     }
@@ -1334,14 +1338,14 @@ async function uploadPodForSession(sessionId, client, idx, btn) {
     });
     const data = await res.json();
     if (data && data.ok) {
-      showToast(`✅ POD uploaded for ${client}`);
+      showToast(`✅ Signed PDF uploaded for ${client}`);
       await loadSessionHistory();
       applyHistoryFilters();
     } else {
-      showToast(`⚠️ POD upload failed: ${(data && data.error) || "unknown error"}`, true);
+      showToast(`⚠️ Upload failed: ${(data && data.error) || "unknown error"}`, true);
     }
   } catch (e) {
-    showToast("⚠️ POD upload failed — check connection", true);
+    showToast("⚠️ Upload failed — check connection", true);
     console.error(e);
   } finally {
     btn.disabled = false;
