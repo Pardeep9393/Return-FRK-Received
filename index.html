@@ -238,6 +238,20 @@
     </div>
   </div>
 
+  <!-- CLOSED SESSION REPORTS — shown right after "Close All Session" -->
+  <div class="card hidden" id="closeReportsCard">
+    <h2>✅ Session Closed — Reports Ready</h2>
+    <table id="closeReportsTable">
+      <thead>
+        <tr><th>Client</th><th>Total AWB</th><th>PDF</th><th>Excel</th></tr>
+      </thead>
+      <tbody id="closeReportsBody"></tbody>
+    </table>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="dismissCloseReportsCard()">Continue</button>
+    </div>
+  </div>
+
   <!-- SESSION HISTORY -->
   <div class="card hidden" id="historyCard">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
@@ -1064,6 +1078,8 @@ async function closeSession() {
     clients: groupRowsByClient()
   };
 
+  let reports = null;
+
   if (!API_URL || API_URL.indexOf("PASTE_YOUR") !== -1) {
     console.log("[DEMO MODE — backend not configured] Would close session:", payload);
   } else {
@@ -1078,8 +1094,9 @@ async function closeSession() {
         if (data.errors && data.errors.length) {
           showToast(`⚠️ Session closed — some reports had issues: ${data.errors.join(" | ")}`, true);
         } else {
-          showToast("✅ Session closed — reports generated. Check Session History to send mail.");
+          showToast("✅ Session closed — reports generated.");
         }
+        reports = data.reports || null;
       } else {
         showToast(`⚠️ Session closed but report generation failed: ${(data && data.error) || "unknown error"}`, true);
       }
@@ -1092,6 +1109,29 @@ async function closeSession() {
   sessionLog = [];
   sessionAllRows = [];
   document.getElementById("scanCard").classList.add("hidden");
+
+  if (reports && reports.length) {
+    renderCloseReportsCard(reports);
+  } else {
+    document.getElementById("selectCard").classList.remove("hidden");
+  }
+}
+
+function renderCloseReportsCard(reports) {
+  const body = document.getElementById("closeReportsBody");
+  body.innerHTML = "";
+  reports.forEach(r => {
+    const tr = document.createElement("tr");
+    const pdfCell = r.pdfLink ? `<a class="link-btn" href="${r.pdfLink}" target="_blank" rel="noopener">📄 View PDF</a>` : `<span style="color:var(--muted);font-size:12px;">Not generated</span>`;
+    const excelCell = r.excelLink ? `<a class="link-btn" href="${r.excelLink}" target="_blank" rel="noopener">📊 View Excel</a>` : `<span style="color:var(--muted);font-size:12px;">Not generated</span>`;
+    tr.innerHTML = `<td>${r.client}</td><td>${r.total || 0}</td><td>${pdfCell}</td><td>${excelCell}</td>`;
+    body.appendChild(tr);
+  });
+  document.getElementById("closeReportsCard").classList.remove("hidden");
+}
+
+function dismissCloseReportsCard() {
+  document.getElementById("closeReportsCard").classList.add("hidden");
   document.getElementById("selectCard").classList.remove("hidden");
 }
 
